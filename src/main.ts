@@ -2,45 +2,19 @@ import 'reset.css'
 import './style.css'
 import { configureStore, createSlice, bindActionCreators, combineReducers } from '@reduxjs/toolkit'
 import type { PayloadAction } from '@reduxjs/toolkit'
-import { from, fromEvent, map, switchMap, takeUntil } from 'rxjs'
+import { from, fromEvent, map, Observable, switchMap, takeUntil } from 'rxjs'
 
 /*
 ======================================================
 Setup
 */
 
-
-const [canvas, ctx] = prepareToDraw(window.innerWidth, window.innerHeight)
-document.body.appendChild(canvas)
-
-
-const PATTERN_SIZE = 64
-
-interface PatternOptions {
-    shiftX: number
-    shiftY: number
-    size: number
-    color?: string,
-}
-
-function createPattern({ shiftX, shiftY, size, color = 'black' }: PatternOptions) {
-    const x = shiftX < 0 ? size + shiftX : shiftX
-    const y = shiftY < 0 ? size + shiftY : shiftY
-    const [canvas, ctx] = prepareToDraw(size)
-    ctx.strokeStyle = color
-    ctx.lineWidth = 1
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, size);
-    ctx.moveTo(0, y);
-    ctx.lineTo(size, y);
-    ctx.stroke();
-    return ctx.createPattern(canvas, 'repeat')!;
-}
-
-
 const initialGridState = {
-    position: { x: 1, y: 1 },
-    moving: false
+    position: {
+        x: 0,
+        y: 0
+    },
+    sample: 100,
 }
 
 type GridState = typeof initialGridState
@@ -49,84 +23,113 @@ const gridSlice = createSlice({
     name: 'grid',
     initialState: initialGridState,
     reducers: {
-        moteTo(state, { payload }: PayloadAction<GridState['position']>) {
-            state.position = payload
-        },
-        moveBy(state, { payload }: PayloadAction<GridState['position']>) {
-            state.position.x = (state.position.x + payload.x) % PATTERN_SIZE
-            state.position.y = (state.position.y + payload.y) % PATTERN_SIZE
-        },
-        moving(state, { payload }: PayloadAction<boolean>) {
-            state.moving = payload
+        moveBy(state, { payload }: PayloadAction<Position>) {
+            state.position.x = (state.position.x + payload.x) % state.sample
+            state.position.y = (state.position.y + payload.y) % state.sample
         },
     },
 })
 
 const store = configureStore({
     reducer: combineReducers({
-        grid: gridSlice.reducer
+        grid: gridSlice.reducer,
     })
 })
 
 export const commit = bindActionCreators({
-    ...gridSlice.actions
+    ...gridSlice.actions,
 }, store.dispatch)
 
 export const store$ = from(store)
 
-namespace Effect {
-    export const updateGridPosition = (pos: GridState['position']): void => {
-        ctx.fillStyle = 'white'
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = createPattern({ shiftX: pos.x, shiftY: pos.y, size: PATTERN_SIZE });
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-    }
-}
+type Position = Record<'x' | 'y', number>
 
+type Size = Record<'width' | 'height', number>
+
+class GridCanvas {
+    constructor(
+        private readonly el: HTMLCanvasElement
+    ) {
+        this.ctx = el.getContext("2d")!;
+
+        const mouseDown$ = fromEvent(this.el, "mousedown");
+        mouseDown$.subscribe(() => {
+            this.setCursor('grabbing')
+        })
+
+        const mouseUp$ = fromEvent(this.el, "mouseup");
+        mouseUp$.subscribe(() => {
+            this.setCursor('grab')
+        })
+
+        this.movement$ = mouseDown$.pipe(
+            switchMap(() =>
+                fromEvent<MouseEvent>(this.el, "mousemove").pipe(
+                    takeUntil(mouseUp$)
+                )
+            ),
+            map(e => ({ x: e.movementX, y: e.movementY }))
+        );
+    }
+
+    public readonly movement$: Observable<{ x: number; y: number }>;
+
+    public paintGrid(grid: GridState): void {
+        const { ctx, el } = this;
+
+        ctx.fillStyle = "#fff";
+        ctx.clearRect(0, 0, el.width, el.height);
+
+        ctx.beginPath();
+        ctx.strokeStyle = "black";
+        let { x, y } = grid.position;
+        while (x < el.width) {
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, el.height);
+            x += grid.sample;
+        }
+        while (y < el.height) {
+            ctx.moveTo(0, y);
+            ctx.lineTo(el.width, y);
+            y += grid.sample;
+        }
+        ctx.stroke();
+        ctx.closePath();
+    }
+
+    public setCanvasSize({ width, height }: Size) {
+        this.el.width = width;
+        this.el.height = height;
+    }
+
+    public setCursor(value: 'grab' | 'grabbing') {
+        this.el.style.cursor = value;
+    }
+
+    private readonly ctx: CanvasRenderingContext2D;
+}
 
 /*
 ======================================================
 Render
 */
 
-const mouseUp$ = fromEvent(window, "mouseup")
-const mouseDown$ = fromEvent(window, "mousedown")
+const gridCanvas = new GridCanvas(document.querySelector('canvas')!)
 
-mouseDown$.subscribe(() => commit.moving(true))
-mouseUp$.subscribe(() => commit.moving(false))
+gridCanvas.movement$.subscribe(commit.moveBy);
 
-mouseDown$
-    .pipe(
-        switchMap(() =>
-            fromEvent<MouseEvent>(window, "mousemove").pipe(takeUntil(mouseUp$))
-        ),
-        map(e => ({ x: e.movementX, y: e.movementY }))
-    )
-    .subscribe(commit.moveBy);
-
-
-store$.pipe(map(state => state.grid.moving)).subscribe(is => {
-    canvas.style.cursor = is ? 'grabbing' : 'grab'
-})
+const stretchCanvas = () => {
+    gridCanvas.setCanvasSize({
+        width: window.innerWidth,
+        height: window.innerHeight
+    })
+}
+stretchCanvas()
+fromEvent(window, 'resize', stretchCanvas)
 
 store$
-    .pipe(map(state => state.grid.position))
-    .subscribe(Effect.updateGridPosition);
+    .pipe(map(state => state.grid))
+    .subscribe(grid => {
+        gridCanvas.paintGrid(grid)
+    });
 
-
-window.addEventListener('dblclick', () => {
-    commit.moteTo({ x: 0, y: 0 })
-})
-
-/*
-======================================================
-Utils
-*/
-
-function prepareToDraw(width: number, height: number = width) {
-    const canvas = document.createElement('canvas')
-    canvas.width = width
-    canvas.height = height
-    const ctx = canvas.getContext('2d')!
-    return [canvas, ctx] as const
-}
