@@ -4,12 +4,3 @@ body {
     height: 100vh;
     width: 100vw;
 }
-
-main {
-    position: absolute;
-    inset: 0;
-    background-color: #2e2e2e;
-    background-image: url("./bg.svg");
-    background-size: 64px;
-    cursor: grab;
-}
