@@ -1,57 +1,33 @@
 import 'reset.css'
 import './style.css'
-import { configureStore, createSlice, bindActionCreators, combineReducers } from '@reduxjs/toolkit'
-import type { PayloadAction } from '@reduxjs/toolkit'
-import { from, fromEvent, map, Observable, switchMap, takeUntil } from 'rxjs'
-
-/*
-======================================================
-Setup
-*/
-
-const initialGridState = {
-    position: {
-        x: 0,
-        y: 0
-    },
-    sample: 100,
-}
-
-type GridState = typeof initialGridState
-
-const gridSlice = createSlice({
-    name: 'grid',
-    initialState: initialGridState,
-    reducers: {
-        moveBy(state, { payload }: PayloadAction<Position>) {
-            state.position.x = (state.position.x + payload.x) % state.sample
-            state.position.y = (state.position.y + payload.y) % state.sample
-        },
-    },
-})
-
-const store = configureStore({
-    reducer: combineReducers({
-        grid: gridSlice.reducer,
-    })
-})
-
-export const commit = bindActionCreators({
-    ...gridSlice.actions,
-}, store.dispatch)
-
-export const store$ = from(store)
-
-type Position = Record<'x' | 'y', number>
-
-type Size = Record<'width' | 'height', number>
+import { fromEvent, map, switchMap, takeUntil } from 'rxjs'
 
 class GridCanvas {
-    constructor(
+    static attachTo(el: HTMLCanvasElement) {
+        return new GridCanvas(el)
+    }
+
+    public init() {
+        this.setupStreams()
+        this.adjustCanvasSize()
+        this.paintGrid()
+        this.setCursor('grab')
+        return this
+    }
+
+    private constructor(
         private readonly el: HTMLCanvasElement
     ) {
         this.ctx = el.getContext("2d")!;
+    }
 
+    private readonly position = { x: 0, y: 0, }
+
+    private readonly sample = 100
+
+    private readonly ctx: CanvasRenderingContext2D;
+
+    private setupStreams() {
         const mouseDown$ = fromEvent(this.el, "mousedown");
         mouseDown$.subscribe(() => {
             this.setCursor('grabbing')
@@ -62,51 +38,58 @@ class GridCanvas {
             this.setCursor('grab')
         })
 
-        this.movement$ = mouseDown$.pipe(
-            switchMap(() =>
-                fromEvent<MouseEvent>(this.el, "mousemove").pipe(
-                    takeUntil(mouseUp$)
-                )
-            ),
-            map(e => ({ x: e.movementX, y: e.movementY }))
-        );
+        mouseDown$
+            .pipe(
+                switchMap(() => fromEvent<MouseEvent>(this.el, "mousemove")
+                    .pipe(takeUntil(mouseUp$))
+                ),
+                map(e => ({
+                    x: (this.position.x + e.movementX) % this.sample,
+                    y: (this.position.y + e.movementY) % this.sample,
+                }))
+            )
+            .subscribe(pos => {
+                this.position.x = pos.x;
+                this.position.y = pos.y;
+                this.paintGrid();
+            });
+
+        fromEvent(window, 'resize').subscribe(() => {
+            this.adjustCanvasSize()
+            this.paintGrid()
+        })
     }
 
-    public readonly movement$: Observable<{ x: number; y: number }>;
-
-    public paintGrid(grid: GridState): void {
-        const { ctx, el } = this;
+    private paintGrid(): void {
+        const { ctx, el, position, sample } = this;
 
         ctx.fillStyle = "#fff";
         ctx.clearRect(0, 0, el.width, el.height);
 
         ctx.beginPath();
         ctx.strokeStyle = "black";
-        let { x, y } = grid.position;
+        let { x, y } = position;
         while (x < el.width) {
             ctx.moveTo(x, 0);
             ctx.lineTo(x, el.height);
-            x += grid.sample;
+            x += sample;
         }
         while (y < el.height) {
             ctx.moveTo(0, y);
             ctx.lineTo(el.width, y);
-            y += grid.sample;
+            y += sample;
         }
         ctx.stroke();
-        ctx.closePath();
     }
 
-    public setCanvasSize({ width, height }: Size) {
-        this.el.width = width;
-        this.el.height = height;
+    private adjustCanvasSize() {
+        this.el.width = window.innerWidth
+        this.el.height = window.innerHeight
     }
 
-    public setCursor(value: 'grab' | 'grabbing') {
+    private setCursor(value: 'grab' | 'grabbing') {
         this.el.style.cursor = value;
     }
-
-    private readonly ctx: CanvasRenderingContext2D;
 }
 
 /*
@@ -114,22 +97,4 @@ class GridCanvas {
 Render
 */
 
-const gridCanvas = new GridCanvas(document.querySelector('canvas')!)
-
-gridCanvas.movement$.subscribe(commit.moveBy);
-
-const stretchCanvas = () => {
-    gridCanvas.setCanvasSize({
-        width: window.innerWidth,
-        height: window.innerHeight
-    })
-}
-stretchCanvas()
-fromEvent(window, 'resize', stretchCanvas)
-
-store$
-    .pipe(map(state => state.grid))
-    .subscribe(grid => {
-        gridCanvas.paintGrid(grid)
-    });
-
+GridCanvas.attachTo(document.querySelector('canvas')!).init()
