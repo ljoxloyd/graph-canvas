@@ -14,8 +14,10 @@
   },
   "dependencies": {
     "@reduxjs/toolkit": "^1.8.5",
+    "open-props": "^1.4.14",
     "redux": "^4.2.0",
     "reset.css": "^2.0.2",
-    "rxjs": "^7.5.6"
+    "rxjs": "^7.5.6",
+    "ts-toolbelt": "^9.6.0"
   }
 }

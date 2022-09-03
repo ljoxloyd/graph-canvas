@@ -1,8 +1,55 @@
 @import 'reset.css';
+@import "open-props/shadows";
+@import "open-props/colors";
+@import "open-props/media";
+
+:root {
+    --light-main: var(--orange-6);
+    --light-text1: var(--gray-8);
+    --light-text2: var(--gray-6);
+    --light-bg1: var(--gray-0);
+    --light-bg2: var(--gray-1);
+    --light-bg3: var(--gray-2);
+    --light-bg4: var(--gray-3);
+
+    --dark-main: var(--orange-3);
+    --dark-text1: var(--gray-1);
+    --dark-text2: var(--gray-4);
+    --dark-bg1: var(--gray-9);
+    --dark-bg2: var(--gray-8);
+    --dark-bg3: var(--gray-7);
+    --dark-bg4: var(--gray-6);
+}
+
+[data-theme="light"] {
+    --main: var(--light-main);
+    --text1: var(--light-text1);
+    --text2: var(--light-text2);
+    --bg1: var(--light-bg1);
+    --bg2: var(--light-bg2);
+    --bg3: var(--light-bg3);
+    --bg4: var(--light-bg4);
+}
+
+[data-theme="dark"] {
+    --main: var(--dark-main);
+    --text1: var(--dark-text1);
+    --text2: var(--dark-text2);
+    --bg1: var(--dark-bg1);
+    --bg2: var(--dark-bg2);
+    --bg3: var(--dark-bg3);
+    --bg4: var(--dark-bg4);
+}
 
 body {
-    position: relative;
-    color: white;
     height: 100vh;
     width: 100vw;
+}
+
+.SideDrawer {
+    position: fixed;
+    inset: 20px auto 20px 20px;
+    background-color: var(--bg1);
+    width: max-content;
+    box-shadow: var(--shadow-4);
 }

@@ -140,10 +140,37 @@ class GridCanvas {
     }
 }
 
-const canvasEl = document.querySelector("canvas");
-if (canvasEl) {
+
+// ================================================
+
+class AppTheme {
+    constructor(
+        styles: CSSStyleDeclaration,
+        public main = styles.getPropertyValue('--main'),
+        public text1 = styles.getPropertyValue('--text1'),
+        public text2 = styles.getPropertyValue('--text2'),
+        public bg1 = styles.getPropertyValue('--bg1'),
+        public bg2 = styles.getPropertyValue('--bg2'),
+        public bg3 = styles.getPropertyValue('--bg3'),
+        public bg4 = styles.getPropertyValue('--bg4'),
+    ) {
+    }
+}
+
+// ================================================
+(() => {
+    const canvasEl = document.querySelector("canvas");
+    if (!canvasEl) return
+
+    const theme = new AppTheme(getComputedStyle(document.body))
+
     GridCanvas
         .attachTo(canvasEl)
+        .config({
+            primary: theme.text1,
+            secondary: theme.text2,
+            background: theme.bg3,
+        })
         .init()
         .paint();
-}
+})()
