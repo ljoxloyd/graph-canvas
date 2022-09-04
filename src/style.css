@@ -6,7 +6,8 @@
 :root {
     --light-main: var(--orange-6);
     --light-text1: var(--gray-8);
-    --light-text2: var(--gray-6);
+    --light-text2: var(--gray-7);
+    --light-line: var(--gray-5);
     --light-bg1: var(--gray-0);
     --light-bg2: var(--gray-1);
     --light-bg3: var(--gray-2);
@@ -14,7 +15,8 @@
 
     --dark-main: var(--orange-3);
     --dark-text1: var(--gray-1);
-    --dark-text2: var(--gray-4);
+    --dark-text2: var(--gray-2);
+    --dark-line: var(--gray-4);
     --dark-bg1: var(--gray-9);
     --dark-bg2: var(--gray-8);
     --dark-bg3: var(--gray-7);
@@ -25,6 +27,7 @@
     --main: var(--light-main);
     --text1: var(--light-text1);
     --text2: var(--light-text2);
+    --line: var(--light-line);
     --bg1: var(--light-bg1);
     --bg2: var(--light-bg2);
     --bg3: var(--light-bg3);
@@ -35,6 +38,7 @@
     --main: var(--dark-main);
     --text1: var(--dark-text1);
     --text2: var(--dark-text2);
+    --line: var(--dark-line);
     --bg1: var(--dark-bg1);
     --bg2: var(--dark-bg2);
     --bg3: var(--dark-bg3);
@@ -44,6 +48,8 @@
 body {
     height: 100vh;
     width: 100vw;
+    overflow: hidden;
+    color: var(--text2);
 }
 
 .SideDrawer {
@@ -52,4 +58,20 @@ body {
     background-color: var(--bg1);
     width: max-content;
     box-shadow: var(--shadow-4);
+}
+
+.GraphNodesAnchor {
+    position: fixed;
+    top: 0;
+    left: 0;
+}
+
+.GraphNode {
+    position: absolute;
+    width: 240px;
+    height: 320px;
+    background-color: var(--bg1);
+    border: 1px solid var(--text1);
+    padding: 5px;
+    margin: 5px;
 }

@@ -1,176 +1,232 @@
-import type { Subscription } from 'rxjs'
-import { fromEvent, map, switchMap, takeUntil } from "rxjs";
+import { combineReducers, configureStore, createAction, createReducer } from '@reduxjs/toolkit';
+import { from, fromEvent, map, switchMap, takeUntil, throttleTime } from "rxjs";
 
-interface GridTheme {
-    primary: string
-    secondary: string
-    background: string
-}
-
-class GridCanvas {
-    static attachTo(el: HTMLCanvasElement) {
-        return new GridCanvas(el);
+namespace GridLayer {
+    export interface Size {
+        width: number
+        height: number
+    }
+    export interface Shift {
+        x: number
+        y: number
+    }
+    export interface CanvasState {
+        size: Size
+    }
+    export interface CursorState {
+        cursor: string
+    }
+    export interface ContextState {
+        shift: Shift
+        majorColor: string
+        minorColor: string
+        background: string
+        cellSize: number
+        subCells: number
+    }
+    export interface State extends CanvasState, ContextState, CursorState {
     }
 
-    public init() {
-        this.setupEvents();
-        this.adjustCanvasSize();
-        this.setCursor("grab");
-        return this;
+    interface Controller extends State { }
+    class Controller {
+        public update(state: State): void {
+            const updates = [
+                this.canvasChanged(state) && this.updateSize,
+                this.cursorChanged(state) && this.updateCursor,
+                this.updateGrid,
+            ]
+            Object.assign(this, state)
+            for (const task of updates) if (task) task.call(this)
+        }
+
+        constructor(
+            private readonly el: HTMLCanvasElement,
+            private readonly ctx: CanvasRenderingContext2D
+        ) {
+        }
+
+        private updateSize(): void {
+            this.el.width = this.size.width;
+            this.el.height = this.size.height;
+        }
+
+        private updateCursor(): void {
+            this.el.style.cursor = this.cursor;
+        }
+
+        private updateGrid(): void {
+            const { ctx, el } = this
+            ctx.fillStyle = this.background
+            ctx.fillRect(0, 0, el.width, el.height);
+
+            ctx.beginPath()
+            ctx.strokeStyle = this.minorColor;
+            this.drawLines(this.cellSize / this.subCells, this.cellSize);
+            ctx.stroke();
+
+            ctx.beginPath()
+            ctx.strokeStyle = this.majorColor;
+            this.drawLines(this.cellSize, 1);
+            ctx.stroke();
+        }
+
+        private drawLines(step: number, start: number): void {
+            const { ctx, el } = this
+            let x = el.width + this.shift.x % this.cellSize + start
+            let y = el.height + this.shift.y % this.cellSize + start
+            while (x > 0) {
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, el.height);
+                x -= step;
+            }
+            while (y > 0) {
+                ctx.moveTo(0, y);
+                ctx.lineTo(el.width, y);
+                y -= step;
+            }
+        }
+
+        private canvasChanged(state: CanvasState): boolean {
+            return !this.size || this.size.width !== state.size.width || this.size.height !== state.size.height
+        }
+
+        private cursorChanged(state: CursorState): boolean {
+            return this.cursor !== state.cursor
+        }
     }
 
-    public paint() {
-        this.paintGrid()
-        return this
-    }
-
-    public config(theme: Partial<GridTheme>) {
-        Object.assign(this.theme, theme)
-        return this
-    }
-
-    private constructor(
-        private readonly el: HTMLCanvasElement
-    ) {
+    export const init = (el: HTMLCanvasElement) => {
         const maybeCtx = el.getContext("2d");
         if (!maybeCtx) {
-            throw new Error("Couldn't get a rendering context")
+            throw new Error("Couldn't get rendering context")
         }
-        this.ctx = maybeCtx;
-    }
-
-    private shiftX = -1;
-    private shiftY = -1;
-
-    private readonly theme: GridTheme = {
-        primary: "#2d2d2d",
-        secondary: "#d2d2d2",
-        background: '#fff'
-    }
-
-    private readonly gap = 360;
-    private readonly subgap = this.gap / 4;
-
-    private readonly ctx: CanvasRenderingContext2D;
-
-    private readonly subscriptions = new Array<Subscription>();
-
-    private setupEvents(self = this) {
-        let i = 0;
-        self.subscriptions.forEach(subscription => {
-            subscription.unsubscribe();
-        });
-
-        const mouseDown$ = fromEvent(self.el, "mousedown");
-        self.subscriptions[i++] = mouseDown$.subscribe(() => {
-            self.setCursor("grabbing");
-        });
-
-        const mouseUp$ = fromEvent(self.el, "mouseup");
-        self.subscriptions[i++] = mouseUp$.subscribe(() => {
-            self.setCursor("grab");
-        });
-
-        self.subscriptions[i++] = mouseDown$
-            .pipe(
-                switchMap(() =>
-                    fromEvent<MouseEvent>(self.el, "mousemove").pipe(takeUntil(mouseUp$))
-                ),
-                map(event => ({
-                    x: (self.shiftX + event.movementX) % self.gap,
-                    y: (self.shiftY + event.movementY) % self.gap,
-                }))
-            )
-            .subscribe(pos => {
-                self.shiftX = pos.x;
-                self.shiftY = pos.y;
-                self.paintGrid();
-            });
-
-        self.subscriptions[i++] = fromEvent(window, "resize").subscribe(() => {
-            self.adjustCanvasSize();
-            self.paintGrid();
-        });
-    }
-
-    private paintGrid(self = this): void {
-        const { ctx, gap, subgap, theme } = self
-        self.clear();
-
-        ctx.beginPath()
-        ctx.strokeStyle = theme.secondary;
-        self.drawLines(subgap);
-        ctx.stroke();
-
-        ctx.beginPath()
-        ctx.strokeStyle = theme.primary;
-        self.drawLines(gap);
-        ctx.stroke();
-    }
-
-    private drawLines(step: number, self = this) {
-        const { ctx, el, shiftY, shiftX, gap } = self
-        let x = shiftX - gap;
-        let y = shiftY - gap;
-        while (x < el.width) {
-            ctx.moveTo(x, 0);
-            ctx.lineTo(x, el.height);
-            x += step;
-        }
-        while (y < el.width) {
-            ctx.moveTo(0, y);
-            ctx.lineTo(el.width, y);
-            y += step;
-        }
-    }
-
-    private clear(self = this) {
-        const { ctx, theme, el } = self
-        ctx.fillStyle = theme.background
-        ctx.fillRect(0, 0, el.width, el.height);
-    }
-
-    private adjustCanvasSize(self = this) {
-        self.el.width = window.innerWidth;
-        self.el.height = window.innerHeight;
-    }
-
-    private setCursor(value: "grab" | "grabbing", self = this) {
-        self.el.style.cursor = value;
+        return new Controller(el, maybeCtx)
     }
 }
 
 
-// ================================================
-
-class AppTheme {
-    constructor(
-        styles: CSSStyleDeclaration,
-        public main = styles.getPropertyValue('--main'),
-        public text1 = styles.getPropertyValue('--text1'),
-        public text2 = styles.getPropertyValue('--text2'),
-        public bg1 = styles.getPropertyValue('--bg1'),
-        public bg2 = styles.getPropertyValue('--bg2'),
-        public bg3 = styles.getPropertyValue('--bg3'),
-        public bg4 = styles.getPropertyValue('--bg4'),
-    ) {
-    }
+namespace Utils {
+    export const keys = <T extends {}>(record: T) => Object.keys(record) as Array<keyof T>
 }
 
-// ================================================
-(() => {
-    const canvasEl = document.querySelector("canvas");
-    if (!canvasEl) return
 
-    const theme = new AppTheme(getComputedStyle(document.body))
+namespace Theme {
+    const theme = {
+        main: '',
+        text1: '',
+        text2: '',
+        line: '',
+        bg1: '',
+        bg2: '',
+        bg3: '',
+        bg4: ''
+    }
 
-    GridCanvas
-        .attachTo(canvasEl)
-        .config({
-            primary: theme.text1,
-            secondary: theme.text2,
-            background: theme.bg3,
+    export const init = () => {
+        const styles = getComputedStyle(document.body)
+        Utils.keys(theme).forEach(key => {
+            theme[key] = styles.getPropertyValue('--' + key)
         })
-        .init()
-        .paint();
-})()
+        return theme
+    }
+}
+
+// ================================================
+
+const theme = Theme.init()
+
+const grid = GridLayer.init(document.querySelector('canvas')!)
+
+const initialGridSate: GridLayer.State = {
+    background: theme.bg2,
+    majorColor: theme.line,
+    minorColor: theme.bg4,
+    cellSize: 360,
+    subCells: 3,
+    cursor: 'grab',
+    shift: {
+        x: 0,
+        y: 0,
+    },
+    size: {
+        width: window.innerWidth,
+        height: window.innerHeight,
+    }
+}
+
+const resized = createAction('[grid] resized')
+const grabbed = createAction('[grid] grabbed')
+const dropped = createAction('[grid] dropped')
+const shifted = createAction('[grid] shifted', (shift: GridLayer.Shift) => ({
+    payload: shift
+}))
+
+
+const gridReducer = createReducer(initialGridSate, ({ addCase }) => {
+    addCase(resized, (state) => {
+        state.size.width = window.innerWidth
+        state.size.height = window.innerHeight
+    })
+    addCase(dropped, (state) => {
+        state.cursor = 'grab'
+    })
+    addCase(grabbed, (state) => {
+        state.cursor = 'grabbing'
+    })
+    addCase(shifted, (state, { payload }) => {
+        state.shift.x += payload.x
+        state.shift.y += payload.y
+    })
+})
+
+const store = configureStore({
+    reducer: combineReducers({
+        grid: gridReducer,
+    }),
+})
+
+const store$ = from(store)
+
+const anchor = document.querySelector<HTMLDivElement>('.GraphNodesAnchor')!
+
+store$.pipe(
+    map(s => s.grid)
+).subscribe(state => {
+    grid.update(state)
+    anchor.style.transform = `translate(${state.shift.x}px, ${state.shift.y}px)`
+})
+
+const mouseDown$ = fromEvent(window, "mousedown");
+mouseDown$.subscribe(() => {
+    store.dispatch(grabbed())
+});
+
+const mouseUp$ = fromEvent(window, "mouseup");
+mouseUp$.subscribe(() => {
+    store.dispatch(dropped())
+});
+
+mouseDown$
+    .pipe(
+        switchMap(() =>
+            fromEvent<MouseEvent>(window, "mousemove").pipe(takeUntil(mouseUp$))
+        ),
+        map(event => ({
+            x: event.movementX,
+            y: event.movementY,
+        }))
+    )
+    .subscribe(by => {
+        store.dispatch(shifted(by))
+    });
+
+fromEvent(window, "resize").pipe(
+    throttleTime(300, undefined, { trailing: true, leading: true })
+).subscribe(() => {
+    store.dispatch(resized())
+});
+
+document.querySelectorAll<HTMLElement>('.GraphNode').forEach((node) => {
+    node.style.top = Math.floor(Math.random() * (window.innerHeight - node.scrollHeight)) + 'px'
+    node.style.left = Math.floor(Math.random() * (window.innerWidth - node.scrollWidth)) + 'px'
+})
