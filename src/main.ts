@@ -39,8 +39,8 @@ class GridCanvas {
         this.ctx = maybeCtx;
     }
 
-    private shiftX = 0;
-    private shiftY = 0;
+    private shiftX = -1;
+    private shiftY = -1;
 
     private readonly theme: GridTheme = {
         primary: "#2d2d2d",
@@ -48,7 +48,7 @@ class GridCanvas {
         background: '#fff'
     }
 
-    private readonly gap = 160;
+    private readonly gap = 360;
     private readonly subgap = this.gap / 4;
 
     private readonly ctx: CanvasRenderingContext2D;
