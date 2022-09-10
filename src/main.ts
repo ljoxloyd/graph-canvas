@@ -1,5 +1,5 @@
-import { combineReducers, configureStore, createAction, createReducer } from '@reduxjs/toolkit';
-import { from, fromEvent, map, switchMap, takeUntil, throttleTime } from "rxjs";
+import { bindActionCreators, combineReducers, configureStore, createAction, createReducer } from '@reduxjs/toolkit';
+import { filter, from, fromEvent, map, switchMap, takeUntil, tap, throttleTime, mergeWith, Observable } from "rxjs";
 
 namespace GridLayer {
     export interface Size {
@@ -58,6 +58,7 @@ namespace GridLayer {
             const { ctx, el } = this
             ctx.fillStyle = this.background
             ctx.fillRect(0, 0, el.width, el.height);
+            ctx.lineWidth = 0.1
 
             ctx.beginPath()
             ctx.strokeStyle = this.minorColor;
@@ -87,7 +88,9 @@ namespace GridLayer {
         }
 
         private canvasChanged(state: CanvasState): boolean {
-            return !this.size || this.size.width !== state.size.width || this.size.height !== state.size.height
+            return !this.size
+                || this.size.width !== state.size.width
+                || this.size.height !== state.size.height
         }
 
         private cursorChanged(state: CursorState): boolean {
@@ -122,7 +125,11 @@ namespace Theme {
         bg4: ''
     }
 
-    export const init = () => {
+    let initialized = false
+
+    export const get = () => {
+        if (initialized) return theme
+
         const styles = getComputedStyle(document.body)
         Utils.keys(theme).forEach(key => {
             theme[key] = styles.getPropertyValue('--' + key)
@@ -133,100 +140,115 @@ namespace Theme {
 
 // ================================================
 
-const theme = Theme.init()
+namespace Model {
+    const theme = Theme.get()
 
-const grid = GridLayer.init(document.querySelector('canvas')!)
-
-const initialGridSate: GridLayer.State = {
-    background: theme.bg2,
-    majorColor: theme.line,
-    minorColor: theme.bg4,
-    cellSize: 360,
-    subCells: 3,
-    cursor: 'grab',
-    shift: {
-        x: 0,
-        y: 0,
-    },
-    size: {
-        width: window.innerWidth,
-        height: window.innerHeight,
+    const initialGridSate: GridLayer.State = {
+        background: theme.bg2,
+        majorColor: theme.line,
+        minorColor: theme.bg4,
+        cellSize: 120,
+        subCells: 3,
+        cursor: 'default',
+        shift: {
+            x: 0,
+            y: 0,
+        },
+        size: {
+            width: window.innerWidth,
+            height: window.innerHeight,
+        }
     }
+
+    const resized = createAction('[grid] resized')
+    const grabbed = createAction('[grid] grabbed')
+    const dropped = createAction('[grid] dropped')
+    const shifted = createAction('[grid] shifted', (shift: GridLayer.Shift) => ({
+        payload: shift
+    }))
+
+    const gridReducer = createReducer(initialGridSate, ({ addCase }) => {
+        addCase(resized, (state) => {
+            state.size.width = window.innerWidth
+            state.size.height = window.innerHeight
+        })
+        addCase(dropped, (state) => {
+            state.cursor = 'default'
+        })
+        addCase(grabbed, (state) => {
+            state.cursor = 'grabbing'
+        })
+        addCase(shifted, (state, { payload }) => {
+            state.shift.x += payload.x
+            state.shift.y += payload.y
+        })
+    })
+
+    const store = configureStore({
+        reducer: combineReducers({
+            grid: gridReducer,
+        }),
+    })
+
+    export const commit = bindActionCreators({
+        resized,
+        grabbed,
+        dropped,
+        shifted,
+    }, store.dispatch)
+
+    export const stream = from(store)
 }
 
-const resized = createAction('[grid] resized')
-const grabbed = createAction('[grid] grabbed')
-const dropped = createAction('[grid] dropped')
-const shifted = createAction('[grid] shifted', (shift: GridLayer.Shift) => ({
-    payload: shift
-}))
+const mouseDown$ = fromEvent<MouseEvent>(window, "mousedown").pipe(
+    filter(e => e.button === 1),
+    tap(e => e.preventDefault())
+);
+const mouseUp$ = fromEvent<MouseEvent>(window, "mouseup").pipe(
+    filter(e => e.button === 1),
+    tap(e => e.preventDefault())
+);
 
-
-const gridReducer = createReducer(initialGridSate, ({ addCase }) => {
-    addCase(resized, (state) => {
-        state.size.width = window.innerWidth
-        state.size.height = window.innerHeight
-    })
-    addCase(dropped, (state) => {
-        state.cursor = 'grab'
-    })
-    addCase(grabbed, (state) => {
-        state.cursor = 'grabbing'
-    })
-    addCase(shifted, (state, { payload }) => {
-        state.shift.x += payload.x
-        state.shift.y += payload.y
-    })
-})
-
-const store = configureStore({
-    reducer: combineReducers({
-        grid: gridReducer,
-    }),
-})
-
-const store$ = from(store)
-
-const anchor = document.querySelector<HTMLDivElement>('.GraphNodesAnchor')!
-
-store$.pipe(
-    map(s => s.grid)
-).subscribe(state => {
-    grid.update(state)
-    anchor.style.transform = `translate(${state.shift.x}px, ${state.shift.y}px)`
-})
-
-const mouseDown$ = fromEvent(window, "mousedown");
-mouseDown$.subscribe(() => {
-    store.dispatch(grabbed())
-});
-
-const mouseUp$ = fromEvent(window, "mouseup");
-mouseUp$.subscribe(() => {
-    store.dispatch(dropped())
-});
-
-mouseDown$
-    .pipe(
+const movement$: Observable<{ x: number, y: number }> = fromEvent<WheelEvent>(window, 'wheel').pipe(
+    map(e => ({
+        x: -e.deltaX,
+        y: -e.deltaY,
+    })),
+    mergeWith(mouseDown$.pipe(
         switchMap(() =>
             fromEvent<MouseEvent>(window, "mousemove").pipe(takeUntil(mouseUp$))
         ),
         map(event => ({
             x: event.movementX,
             y: event.movementY,
-        }))
+        })))
     )
-    .subscribe(by => {
-        store.dispatch(shifted(by))
-    });
+);
 
-fromEvent(window, "resize").pipe(
+const resize$ = fromEvent(window, "resize").pipe(
     throttleTime(300, undefined, { trailing: true, leading: true })
-).subscribe(() => {
-    store.dispatch(resized())
+);
+
+movement$.subscribe(by => {
+    Model.commit.shifted(by)
+});
+resize$.subscribe(() => {
+    Model.commit.resized()
+});
+mouseDown$.subscribe(() => {
+    Model.commit.grabbed()
+});
+mouseUp$.subscribe(() => {
+    Model.commit.dropped()
 });
 
-document.querySelectorAll<HTMLElement>('.GraphNode').forEach((node) => {
-    node.style.top = Math.floor(Math.random() * (window.innerHeight - node.scrollHeight)) + 'px'
-    node.style.left = Math.floor(Math.random() * (window.innerWidth - node.scrollWidth)) + 'px'
+
+// Main:
+
+const grid = GridLayer.init(document.querySelector('canvas')!)
+
+Model.stream.pipe(
+    map(s => s.grid)
+).subscribe(state => {
+    grid.update(state)
 })
