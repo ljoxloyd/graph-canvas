@@ -1,5 +1,21 @@
-import { bindActionCreators, combineReducers, configureStore, createAction, createReducer } from '@reduxjs/toolkit';
-import { filter, from, fromEvent, map, switchMap, takeUntil, tap, throttleTime, mergeWith, Observable } from "rxjs";
+import {
+    bindActionCreators,
+    combineReducers,
+    configureStore,
+    createAction,
+    createReducer,
+} from '@reduxjs/toolkit';
+import {
+    filter,
+    from,
+    fromEvent,
+    map,
+    switchMap,
+    takeUntil,
+    tap,
+    mergeWith,
+    Observable,
+} from "rxjs";
 
 namespace GridLayer {
     export interface Size {
@@ -160,17 +176,19 @@ namespace Model {
         }
     }
 
-    const resized = createAction('[grid] resized')
     const grabbed = createAction('[grid] grabbed')
     const dropped = createAction('[grid] dropped')
+    const resized = createAction('[grid] resized', (size: GridLayer.Size) => ({
+        payload: size
+    }))
     const shifted = createAction('[grid] shifted', (shift: GridLayer.Shift) => ({
         payload: shift
     }))
 
     const gridReducer = createReducer(initialGridSate, ({ addCase }) => {
-        addCase(resized, (state) => {
-            state.size.width = window.innerWidth
-            state.size.height = window.innerHeight
+        addCase(resized, (state, { payload }) => {
+            state.size.width = payload.width
+            state.size.height = payload.height
         })
         addCase(dropped, (state) => {
             state.cursor = 'default'
@@ -200,40 +218,57 @@ namespace Model {
     export const stream = from(store)
 }
 
-const mouseDown$ = fromEvent<MouseEvent>(window, "mousedown").pipe(
+const canvas = document.querySelector('canvas')!
+const parent = document.body
+
+const mouseDown$ = fromEvent<MouseEvent>(canvas, "mousedown").pipe(
     filter(e => e.button === 1),
     tap(e => e.preventDefault())
 );
-const mouseUp$ = fromEvent<MouseEvent>(window, "mouseup").pipe(
+const mouseUp$ = fromEvent<MouseEvent>(canvas, "mouseup").pipe(
     filter(e => e.button === 1),
     tap(e => e.preventDefault())
 );
 
-const movement$: Observable<{ x: number, y: number }> = fromEvent<WheelEvent>(window, 'wheel').pipe(
+const justWheel$ = fromEvent<WheelEvent>(canvas, 'wheel');
+const movement$: Observable<{ x: number, y: number }> = justWheel$.pipe(
+    filter(e => !e.ctrlKey && !e.altKey),
     map(e => ({
         x: -e.deltaX,
         y: -e.deltaY,
     })),
     mergeWith(mouseDown$.pipe(
         switchMap(() =>
-            fromEvent<MouseEvent>(window, "mousemove").pipe(takeUntil(mouseUp$))
+            fromEvent<MouseEvent>(canvas, "mousemove").pipe(takeUntil(mouseUp$))
         ),
-        map(event => ({
-            x: event.movementX,
-            y: event.movementY,
+        map(e => ({
+            x: e.movementX,
+            y: e.movementY,
         })))
     )
 );
 
-const resize$ = fromEvent(window, "resize").pipe(
-    throttleTime(300, undefined, { trailing: true, leading: true })
-);
+
+const resize$ = new Observable<ResizeObserverSize>(subscriber => {
+    const observer = new ResizeObserver(([entry]) =>
+        subscriber.next(entry.borderBoxSize[0])
+    )
+    observer.observe(parent, { box: 'border-box' })
+    return function unsubscribe() {
+        observer.unobserve(parent)
+    }
+}).pipe(
+    map(size => ({
+        height: size.blockSize,
+        width: size.inlineSize,
+    }))
+)
 
 movement$.subscribe(by => {
     Model.commit.shifted(by)
 });
-resize$.subscribe(() => {
-    Model.commit.resized()
+resize$.subscribe(size => {
+    Model.commit.resized(size)
 });
 mouseDown$.subscribe(() => {
     Model.commit.grabbed()

@@ -57,7 +57,7 @@ body {
     z-index: 10;
     inset: 20px auto 20px 20px;
     background-color: var(--bg1);
-    width: 400px;
+    width: 280px;
     box-shadow: var(--shadow-4);
 }
 
