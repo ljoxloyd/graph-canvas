@@ -15,6 +15,8 @@ import {
     tap,
     Observable,
     merge,
+    Subject,
+    throttleTime,
 } from "rxjs";
 
 namespace GridLayer {
@@ -125,7 +127,35 @@ namespace GridLayer {
 
 
 namespace Utils {
-    export const keys = <T extends {}>(record: T) => Object.keys(record) as Array<keyof T>
+    export const keys = <T extends {}>(record: T) => Object.keys(record) as Array<keyof T>;
+
+    export const fromResize = (() => {
+        const subject = new Subject<ResizeObserverEntry[]>();
+        const observer = new ResizeObserver(subject.next.bind(subject));
+
+        const sizeNames = {
+            'border-box': 'borderBoxSize',
+            'content-box': 'contentBoxSize',
+            "device-pixel-content-box": 'devicePixelContentBoxSize'
+        } as const;
+
+        return (
+            el: HTMLElement,
+            box: ResizeObserverOptions["box"] = 'border-box'
+        ) => new Observable<ResizeObserverSize>(subscriber => {
+
+            observer.observe(el, { box });
+            const subscription = subject.subscribe(entries => {
+                const entry = entries.find(entry => entry.target === el);
+                if (entry) subscriber.next(entry[sizeNames[box]][0])
+            });
+
+            return () => {
+                observer.unobserve(el);
+                subscription.unsubscribe();
+            };
+        });
+    })()
 }
 
 
@@ -230,6 +260,16 @@ const mouseUp$ = fromEvent<MouseEvent>(canvas, "mouseup").pipe(
     tap(e => e.preventDefault())
 );
 
+const dragScroll$: Observable<GridLayer.Shift> = mouseDown$.pipe(
+    switchMap(() =>
+        fromEvent<MouseEvent>(canvas, "mousemove").pipe(takeUntil(mouseUp$))
+    ),
+    map(e => ({
+        x: e.movementX,
+        y: e.movementY,
+    }))
+);
+
 const wheelScroll$: Observable<GridLayer.Shift> = fromEvent<WheelEvent>(canvas, 'wheel').pipe(
     filter(e => !e.ctrlKey && !e.altKey),
     map(e => e.shiftKey ? ({
@@ -241,27 +281,10 @@ const wheelScroll$: Observable<GridLayer.Shift> = fromEvent<WheelEvent>(canvas, 
     }))
 )
 
-const dragScroll$: Observable<GridLayer.Shift> = mouseDown$.pipe(
-    switchMap(() =>
-        fromEvent<MouseEvent>(canvas, "mousemove").pipe(takeUntil(mouseUp$))
-    ),
-    map(e => ({
-        x: e.movementX,
-        y: e.movementY,
-    }))
-)
-
 const movement$ = merge(wheelScroll$, dragScroll$)
 
-const resize$ = new Observable<ResizeObserverSize>(subscriber => {
-    const observer = new ResizeObserver(([entry]) =>
-        subscriber.next(entry.borderBoxSize[0])
-    )
-    observer.observe(parent, { box: 'border-box' })
-    return function unsubscribe() {
-        observer.unobserve(parent)
-    }
-}).pipe(
+const resize$ = Utils.fromResize(parent, 'border-box').pipe(
+    throttleTime(300, undefined, { trailing: true, leading: true }),
     map(size => ({
         height: size.blockSize,
         width: size.inlineSize,
