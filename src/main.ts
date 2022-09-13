@@ -13,8 +13,8 @@ import {
     switchMap,
     takeUntil,
     tap,
-    mergeWith,
     Observable,
+    merge,
 } from "rxjs";
 
 namespace GridLayer {
@@ -163,7 +163,7 @@ namespace Model {
         background: theme.bg2,
         majorColor: theme.line,
         minorColor: theme.bg4,
-        cellSize: 120,
+        cellSize: 360,
         subCells: 3,
         cursor: 'default',
         shift: {
@@ -230,24 +230,28 @@ const mouseUp$ = fromEvent<MouseEvent>(canvas, "mouseup").pipe(
     tap(e => e.preventDefault())
 );
 
-const justWheel$ = fromEvent<WheelEvent>(canvas, 'wheel');
-const movement$: Observable<{ x: number, y: number }> = justWheel$.pipe(
+const wheelScroll$: Observable<GridLayer.Shift> = fromEvent<WheelEvent>(canvas, 'wheel').pipe(
     filter(e => !e.ctrlKey && !e.altKey),
-    map(e => ({
+    map(e => e.shiftKey ? ({
+        x: -e.deltaY,
+        y: -e.deltaX,
+    }) : ({
         x: -e.deltaX,
         y: -e.deltaY,
-    })),
-    mergeWith(mouseDown$.pipe(
-        switchMap(() =>
-            fromEvent<MouseEvent>(canvas, "mousemove").pipe(takeUntil(mouseUp$))
-        ),
-        map(e => ({
-            x: e.movementX,
-            y: e.movementY,
-        })))
-    )
-);
+    }))
+)
 
+const dragScroll$: Observable<GridLayer.Shift> = mouseDown$.pipe(
+    switchMap(() =>
+        fromEvent<MouseEvent>(canvas, "mousemove").pipe(takeUntil(mouseUp$))
+    ),
+    map(e => ({
+        x: e.movementX,
+        y: e.movementY,
+    }))
+)
+
+const movement$ = merge(wheelScroll$, dragScroll$)
 
 const resize$ = new Observable<ResizeObserverSize>(subscriber => {
     const observer = new ResizeObserver(([entry]) =>
